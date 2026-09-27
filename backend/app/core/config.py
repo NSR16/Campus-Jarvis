@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     frontend_origin: str = "http://localhost:5173"
     ollama_base_url: str = "http://localhost:11434"
     embedding_model: str = "nomic-embed-text"
+    generation_model: str = "qwen2.5:3b"
     database_host: str = "localhost"
     database_port: int = 5432
     database_name: str = "campus_jarvis"
