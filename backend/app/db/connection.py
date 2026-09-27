@@ -1,5 +1,8 @@
 from dataclasses import dataclass
 
+from psycopg.conninfo import make_conninfo
+from psycopg_pool import AsyncConnectionPool
+
 from app.core.config import Settings
 
 
@@ -13,9 +16,12 @@ class DatabaseConfig:
 
     @property
     def dsn(self) -> str:
-        return (
-            f"postgresql://{self.user}:{self.password}"
-            f"@{self.host}:{self.port}/{self.name}"
+        return make_conninfo(
+            host=self.host,
+            port=self.port,
+            dbname=self.name,
+            user=self.user,
+            password=self.password,
         )
 
 
@@ -27,4 +33,16 @@ def get_database_config(settings: Settings) -> DatabaseConfig:
         name=settings.database_name,
         user=settings.database_user,
         password=settings.database_password,
+    )
+
+
+def create_connection_pool(settings: Settings) -> AsyncConnectionPool:
+    """Create, but do not open, the application's asynchronous connection pool."""
+    database_config = get_database_config(settings)
+    return AsyncConnectionPool(
+        conninfo=database_config.dsn,
+        min_size=1,
+        max_size=10,
+        timeout=30.0,
+        open=False,
     )

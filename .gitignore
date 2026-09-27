@@ -1,26 +1,61 @@
+# =========================
 # Python
+# =========================
 __pycache__/
 *.py[cod]
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
 
-# Local Python environment
-backend/.venv/
+# Virtual environments
+.venv/
+venv/
 
-# Environment files
+# Build and packaging
+build/
+dist/
+*.egg-info/
+
+# =========================
+# Environment and secrets
+# =========================
 .env
 .env.*
 !.env.example
 
+# =========================
 # Frontend
+# =========================
 frontend/node_modules/
 frontend/dist/
-frontend/*.js
-frontend/*.d.ts
-*.tsbuildinfo
+frontend/.vite/
+frontend/coverage/
+frontend/*.tsbuildinfo
 
-# Editor and OS
+# =========================
+# Local databases and logs
+# =========================
+*.log
+*.sqlite
+*.sqlite3
+*.db
+
+# =========================
+# Local AI models (if stored in repo)
+# =========================
+*.gguf
+
+# =========================
+# Editors and operating system
+# =========================
 .vscode/
+.idea/
 .DS_Store
 Thumbs.db
+
+# Generated Vite config build artifacts
+frontend/vite.config.js
+frontend/vite.config.d.ts

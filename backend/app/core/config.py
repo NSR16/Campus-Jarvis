@@ -7,6 +7,8 @@ class Settings(BaseSettings):
     app_name: str = "Campus JARVIS API"
     app_env: str = "development"
     frontend_origin: str = "http://localhost:5173"
+    ollama_base_url: str = "http://localhost:11434"
+    embedding_model: str = "nomic-embed-text"
     database_host: str = "localhost"
     database_port: int = 5432
     database_name: str = "campus_jarvis"
