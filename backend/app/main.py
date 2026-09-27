@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes.documents import router as documents_router
 from app.api.routes.health import router as health_router
+from app.api.routes.query import router as query_router
 from app.core.config import get_settings
 from app.db.connection import create_connection_pool
 
@@ -29,9 +30,10 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[settings.frontend_origin],
     allow_credentials=True,
-    allow_methods=["GET"],
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
 
 app.include_router(health_router)
 app.include_router(documents_router)
+app.include_router(query_router)
