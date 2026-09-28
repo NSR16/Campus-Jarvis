@@ -117,7 +117,7 @@ The current prototype implements the following functionality:
 
 When a user submits a question through `POST /ask`, the backend performs the following steps:
 
-1. **Query embedding:** Converts the user's question into an embedding using the local embedding model.
+1. **Query embedding:** Converts the user's question into  embedding using the local embedding model.
 2. **Semantic retrieval:** Searches the stored document chunks in PostgreSQL using pgvector.
 3. **Context construction:** Passes the question and retrieved evidence to the local language model.
 4. **Answer generation:** Qwen generates a response based on the supplied evidence.
