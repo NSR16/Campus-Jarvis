@@ -1,12 +1,18 @@
+import hashlib
 import math
 
 from pydantic import BaseModel, field_validator
+from psycopg import AsyncConnection
 from psycopg_pool import AsyncConnectionPool
 
 from app.services.chunking import chunk_text
 from app.services.embeddings import generate_embedding
 
 EMBEDDING_DIMENSIONS = 768
+
+
+def _content_sha256(content: str) -> str:
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
 
 class DocumentIngestionRequest(BaseModel):
@@ -36,6 +42,7 @@ class DocumentIngestionResponse(BaseModel):
     title: str
     document_type: str
     chunk_count: int
+    content_already_existed: bool = False
 
 
 class EmbeddingDimensionError(Exception):
@@ -68,7 +75,14 @@ async def ingest_document(
     request: DocumentIngestionRequest,
     pool: AsyncConnectionPool,
 ) -> DocumentIngestionResponse:
-    """Embed unique chunks, then persist one document atomically with its chunks."""
+    """Avoid duplicate content, then persist new documents and chunks atomically."""
+    content_sha256 = _content_sha256(request.content)
+
+    async with pool.connection() as connection:
+        existing_document = await _find_document_by_hash(connection, content_sha256)
+        if existing_document is not None:
+            return existing_document
+
     chunks = list(dict.fromkeys(chunk_text(request.content)))
     embedded_chunks: list[tuple[str, str]] = []
 
@@ -81,15 +95,31 @@ async def ingest_document(
         async with connection.transaction():
             document_cursor = await connection.execute(
                 """
-                INSERT INTO documents (title, source, document_type)
-                VALUES (%s, %s, %s)
+                INSERT INTO documents
+                    (title, source, document_type, content_sha256)
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT (content_sha256) DO NOTHING
                 RETURNING id
                 """,
-                (request.title, request.source, request.document_type),
+                (
+                    request.title,
+                    request.source,
+                    request.document_type,
+                    content_sha256,
+                ),
             )
             document_row = await document_cursor.fetchone()
             if document_row is None:
-                raise RuntimeError("Document insert did not return an ID")
+                existing_document = await _find_document_by_hash(
+                    connection,
+                    content_sha256,
+                )
+                if existing_document is None:
+                    raise RuntimeError(
+                        "Document insert conflicted but the existing document "
+                        "could not be found"
+                    )
+                return existing_document
 
             document_id = int(document_row[0])
             for chunk_index, (chunk, vector_literal) in enumerate(embedded_chunks):
@@ -107,4 +137,32 @@ async def ingest_document(
         title=request.title,
         document_type=request.document_type,
         chunk_count=len(embedded_chunks),
+    )
+
+
+async def _find_document_by_hash(
+    connection: AsyncConnection,
+    content_sha256: str,
+) -> DocumentIngestionResponse | None:
+    cursor = await connection.execute(
+        """
+        SELECT documents.id, documents.title, documents.document_type,
+               COUNT(document_chunks.id)
+        FROM documents
+        LEFT JOIN document_chunks ON document_chunks.document_id = documents.id
+        WHERE documents.content_sha256 = %s
+        GROUP BY documents.id, documents.title, documents.document_type
+        """,
+        (content_sha256,),
+    )
+    document_row = await cursor.fetchone()
+    if document_row is None:
+        return None
+
+    return DocumentIngestionResponse(
+        document_id=int(document_row[0]),
+        title=document_row[1],
+        document_type=document_row[2],
+        chunk_count=int(document_row[3]),
+        content_already_existed=True,
     )

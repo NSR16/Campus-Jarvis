@@ -44,6 +44,7 @@ def test_create_document_returns_created_response(monkeypatch) -> None:
         "title": "Library hours",
         "document_type": "notice",
         "chunk_count": 2,
+        "content_already_existed": False,
     }
 
 

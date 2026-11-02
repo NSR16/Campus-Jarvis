@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 import pytest
@@ -68,6 +69,48 @@ async def test_schema_initializer_executes_checked_in_sql() -> None:
     assert fake_connection.prepare is False
     assert "CREATE EXTENSION IF NOT EXISTS vector" in fake_connection.query
     assert "VECTOR(768) NOT NULL" in fake_connection.query
+
+    documents_table = re.search(
+        r"CREATE TABLE IF NOT EXISTS documents\s*\((.*?)\n\);",
+        fake_connection.query,
+        re.DOTALL,
+    )
+    assert documents_table is not None
+    assert re.search(
+        r"\bcontent_sha256\s+TEXT\s+NOT\s+NULL\b",
+        documents_table.group(1),
+    )
+    assert re.search(
+        r"CHECK\s*\(\s*content_sha256\s*~\s*'\^\[0-9a-f\]\{64\}\$'\s*\)",
+        documents_table.group(1),
+    )
+    assert re.search(
+        r"CONSTRAINT\s+uq_documents_content_sha256\s+UNIQUE\s*"
+        r"\(\s*content_sha256\s*\)",
+        documents_table.group(1),
+    )
+
+    assert re.search(
+        r"ALTER TABLE documents\s+ADD COLUMN IF NOT EXISTS "
+        r"content_sha256 TEXT\s*;",
+        fake_connection.query,
+        re.DOTALL,
+    )
+    assert re.search(
+        r"IF NOT EXISTS\s*\(\s*SELECT 1\s+FROM pg_constraint\s+"
+        r"WHERE conname = 'ck_documents_content_sha256'.*?"
+        r"\)\s*THEN\s*ALTER TABLE documents\s+ADD CONSTRAINT "
+        r"ck_documents_content_sha256\s+CHECK\s*"
+        r"\(\s*content_sha256\s*~\s*'\^\[0-9a-f\]\{64\}\$'\s*\)",
+        fake_connection.query,
+        re.DOTALL,
+    )
+    assert re.search(
+        r"CREATE UNIQUE INDEX IF NOT EXISTS uq_documents_content_sha256\s+"
+        r"ON documents\s*\(\s*content_sha256\s*\)",
+        fake_connection.query,
+        re.DOTALL,
+    )
 
 
 @pytest.mark.anyio
