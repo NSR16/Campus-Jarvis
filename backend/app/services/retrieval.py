@@ -72,23 +72,36 @@ async def retrieve_chunks(
                    document_chunks.embedding <=> %s::vector AS distance
             FROM document_chunks
             JOIN documents ON documents.id = document_chunks.document_id
-            ORDER BY document_chunks.embedding <=> %s::vector ASC
+            ORDER BY
+                document_chunks.embedding <=> %s::vector ASC,
+                document_chunks.id ASC
             LIMIT %s
             """,
-            (vector_literal, vector_literal, top_k),
+            (vector_literal, vector_literal, top_k * 2),
         )
         rows = await cursor.fetchall()
 
-    return [
-        RetrievedChunk(
-            chunk_id=row[0],
-            document_id=row[1],
-            title=row[2],
-            source=row[3],
-            document_type=row[4],
-            chunk_index=row[5],
-            content=row[6],
-            distance=row[7],
+    results: list[RetrievedChunk] = []
+    seen_content: set[str] = set()
+    for row in rows:
+        content = row[6]
+        if content in seen_content:
+            continue
+
+        seen_content.add(content)
+        results.append(
+            RetrievedChunk(
+                chunk_id=row[0],
+                document_id=row[1],
+                title=row[2],
+                source=row[3],
+                document_type=row[4],
+                chunk_index=row[5],
+                content=content,
+                distance=row[7],
+            )
         )
-        for row in rows
-    ]
+        if len(results) == top_k:
+            break
+
+    return results

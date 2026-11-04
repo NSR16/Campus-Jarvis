@@ -52,6 +52,44 @@ def make_embedding() -> list[float]:
     return [0.25] * retrieval.EMBEDDING_DIMENSIONS
 
 
+def make_row(
+    chunk_id: int,
+    document_id: int,
+    content: str,
+    distance: float,
+    title: str | None = None,
+) -> tuple[object, ...]:
+    return (
+        chunk_id,
+        document_id,
+        title or f"Document {document_id}",
+        f"document-{document_id}.txt",
+        "notice",
+        chunk_id,
+        content,
+        distance,
+    )
+
+
+async def retrieve_rows(
+    monkeypatch: pytest.MonkeyPatch,
+    rows: list[tuple[object, ...]],
+    top_k: int,
+) -> tuple[list[retrieval.RetrievedChunk], FakeConnection]:
+    connection = FakeConnection(rows)
+
+    async def fake_generate_embedding(_: str) -> list[float]:
+        return make_embedding()
+
+    monkeypatch.setattr(retrieval, "generate_embedding", fake_generate_embedding)
+    results = await retrieval.retrieve_chunks(
+        "question",
+        FakePool(connection),  # type: ignore[arg-type]
+        top_k=top_k,
+    )
+    return results, connection
+
+
 @pytest.mark.anyio
 async def test_retrieve_chunks_returns_nearest_chunks_and_metadata(
     monkeypatch: pytest.MonkeyPatch,
@@ -81,9 +119,123 @@ async def test_retrieve_chunks_returns_nearest_chunks_and_metadata(
     assert connection.query is not None
     assert "JOIN documents ON documents.id = document_chunks.document_id" in connection.query
     assert "<=> %s::vector" in connection.query
-    assert "ORDER BY document_chunks.embedding <=> %s::vector ASC" in connection.query
+    assert "document_chunks.embedding <=> %s::vector ASC" in connection.query
+    assert "document_chunks.id ASC" in connection.query
+    assert "document_chunks.id ASC" in connection.query
     assert "LIMIT %s" in connection.query
-    assert connection.params == ("[" + ",".join(["0.25"] * 768) + "]",) * 2 + (2,)
+    assert connection.params == ("[" + ",".join(["0.25"] * 768) + "]",) * 2 + (4,)
+
+
+@pytest.mark.anyio
+async def test_retrieve_chunks_deduplicates_exact_content(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    results, _ = await retrieve_rows(
+        monkeypatch,
+        [
+            make_row(1, 7, "Repeated content", 0.1),
+            make_row(2, 7, "Repeated content", 0.2),
+            make_row(3, 7, "Other content", 0.3),
+        ],
+        top_k=2,
+    )
+
+    assert [result.chunk_id for result in results] == [1, 3]
+
+
+@pytest.mark.anyio
+async def test_retrieve_chunks_deduplicates_content_across_documents_and_keeps_nearest(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    results, _ = await retrieve_rows(
+        monkeypatch,
+        [
+            make_row(1, 7, "Shared content", 0.1, title="Nearest document"),
+            make_row(2, 8, "Shared content", 0.2, title="Other document"),
+            make_row(3, 9, "Unique content", 0.3),
+        ],
+        top_k=2,
+    )
+
+    assert [result.chunk_id for result in results] == [1, 3]
+    assert results[0].document_id == 7
+    assert results[0].title == "Nearest document"
+    assert results[0].distance == 0.1
+
+
+@pytest.mark.anyio
+async def test_retrieve_chunks_keeps_different_content_separate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    results, _ = await retrieve_rows(
+        monkeypatch,
+        [
+            make_row(1, 7, "First content", 0.1),
+            make_row(2, 7, "Different content", 0.2),
+        ],
+        top_k=2,
+    )
+
+    assert [result.content for result in results] == [
+        "First content",
+        "Different content",
+    ]
+
+
+@pytest.mark.anyio
+async def test_retrieve_chunks_returns_fewer_when_candidate_pool_is_exhausted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    results, connection = await retrieve_rows(
+        monkeypatch,
+        [
+            make_row(1, 7, "Repeated content", 0.1),
+            make_row(2, 8, "Repeated content", 0.2),
+            make_row(3, 9, "Only other content", 0.3),
+        ],
+        top_k=3,
+    )
+
+    assert [result.chunk_id for result in results] == [1, 3]
+    assert connection.params is not None
+    assert connection.params[-1] == 6
+
+
+@pytest.mark.anyio
+async def test_retrieve_chunks_top_k_one_fetches_two_candidates_and_returns_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    results, connection = await retrieve_rows(
+        monkeypatch,
+        [
+            make_row(1, 7, "Repeated content", 0.1),
+            make_row(2, 8, "Repeated content", 0.2),
+        ],
+        top_k=1,
+    )
+
+    assert [result.chunk_id for result in results] == [1]
+    assert connection.params is not None
+    assert connection.params[-1] == 2
+
+
+@pytest.mark.anyio
+async def test_retrieve_chunks_content_deduplication_is_whitespace_sensitive(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    results, _ = await retrieve_rows(
+        monkeypatch,
+        [
+            make_row(1, 7, "Exact content", 0.1),
+            make_row(2, 7, "Exact content ", 0.2),
+        ],
+        top_k=2,
+    )
+
+    assert [result.content for result in results] == [
+        "Exact content",
+        "Exact content ",
+    ]
 
 
 @pytest.mark.anyio
